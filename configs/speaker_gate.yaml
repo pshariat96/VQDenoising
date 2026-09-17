@@ -1,0 +1,61 @@
+train:
+  batch_size: 32
+  num_epochs: 20
+  accumulation_steps: 1
+  num_workers: 4
+  precision: "16-mixed"
+  log_dir: exp/speaker_gate
+  gradient_clip_val: 0.5
+  spectral_aug: true
+  freeze_backbone: true
+  unfreeze_after_epoch: 10
+
+model:
+  C: 1024
+
+dataset:
+  enable_train_360: false
+  enable_train_100: true
+  train_100_dir: '/content/AD-FlowTSE/data/wav16k/min/train-100'
+  val_dir: '/content/AD-FlowTSE/data/wav16k/min/dev'
+  test_dir: '/content/AD-FlowTSE/data/wav16k/min/test'
+  librimix_meta_dir: '/content/LibriMix/metadata'
+  task: 'sep_noisy'
+  n_src: 2
+  sample_rate: 16000
+  segment: 3
+  segment_aux: 3
+  n_fft: 510
+  win_length: 510
+  hop_length: 128
+  snr_range: [-15, 15]
+
+optim:
+  optimizer: AdamW
+  lr: 0.0003
+  weight_decay: 0.01
+
+scheduler:
+  type: 'CosineAnnealingLR'
+  t_max: 20
+  eta_min: 0.000001
+  warmup_epochs: 2
+
+seed: 42
+
+early_stopping:
+  enabled: true
+  monitor: 'val_loss'
+  patience: 5
+  verbose: true
+  mode: 'min'
+  delta: 0.0
+
+checkpoint:
+  dir: 'exp/speaker_gate/checkpoints'
+  ckpt_name: 'best'
+  save_last: true
+  verbose: true
+  monitor: 'val_loss'
+  mode: min
+  pretrained_ecapa_ckpt: 't_predictor_noisy.ckpt'

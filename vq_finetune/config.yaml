@@ -1,0 +1,130 @@
+# MetricGAN Voice Quality Fine-Tuning Configuration
+
+# Global RNG seed (reproducible subset use, data shuffling, init). Used by train.py.
+seed: 42
+
+# Experiment arm (one training harness, five arms -- see train.py ARMS):
+#   A0  L1 + multi-res STFT                       (no VQ      -- control)
+#   A1  L1 + multi-res STFT + VQ-MetricGAN        (our method, A-family)
+#   B0  SEMamba 6-term loss (PESQ-MetricGAN)      (no VQ      -- control)
+#   B1  SEMamba loss, PESQ-Metric -> VQ-Metric    (VQ swap)
+#   B2  SEMamba loss, PESQ-Metric + VQ-Metric     (VQ added)
+# Frozen RE-USE baseline = step-0 validation (captured automatically, every arm).
+# Override per run with: python train.py --arm B1
+experiment:
+  arm: "B1"
+
+# Data (URGENT 2025 Challenge -- same data RE-USE was trained on)
+# Generate verbatim with the (subset-edited) repo at ../urgent2025_challenge via
+# ./prepare_espnet_data.sh -> writes simulation_train/log/meta.tsv + .flac pairs.
+data:
+  # URGENT native mode: point at the meta.tsv produced by the simulation. The
+  # dataloader reads it directly and resamples each pair to sample_rate on the
+  # fly (URGENT output stays untouched on disk). data_root is auto-derived as the
+  # repo root that holds simulation_train/; override only if you moved the audio.
+  train_meta_tsv: "../urgent2025_challenge/simulation_train/log/meta_train_10k.tsv"
+  data_root: ""            # "" -> auto (three levels up from meta.tsv)
+  # Proper no-leakage validation: URGENT's own dev-clean validation simulation
+  # (disjoint speakers from train). Produced by prepare_espnet_data.sh's
+  # validation block (subset-edited to LibriTTS dev-clean + FSD50K).
+  test_meta_tsv: "../urgent2025_challenge/simulation_validation/log/meta.tsv"
+  val_split: 0.05          # only used as a fallback if test_meta_tsv is empty
+
+  # Directory mode (used only if *_meta_tsv are empty): flat noisy/ + clean/ dirs.
+  train_noisy_dir: "./data/urgent2025/train/noisy"
+  train_clean_dir: "./data/urgent2025/train/clean"
+  test_noisy_dir: "./data/urgent2025/val/noisy"
+  test_clean_dir: "./data/urgent2025/val/clean"
+
+  sample_rate: 16000
+  segment_length: 64000  # 4 seconds at 16kHz
+  min_segment_length: 16000  # 1 second minimum
+  audio_extensions: [".wav", ".flac"]
+
+# RE-USE (Generator)
+generator:
+  pretrained: "nvidia/RE-USE"
+  freeze_layers: 0  # 0 = fine-tune all layers
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+
+# Discriminator
+# The discriminator is trained FROM SCRATCH in every arm, so to stay faithful to
+# SEMamba we use SEMamba's own optimizer settings (AdamW lr=5e-4, betas=0.8/0.99).
+# Verbatim from SEMamba/train.py setup_optimizers + SEMamba_advanced.yaml.
+discriminator:
+  learning_rate: 5.0e-4   # SEMamba's from-scratch LR (faithful)
+  weight_decay: 0.01
+  adam_b1: 0.8            # SEMamba AdamW beta1 (faithful)
+  adam_b2: 0.99           # SEMamba AdamW beta2 (faithful)
+  n_fft: 512
+  hop_length: 128
+
+# Voice Quality Metric
+vq_metric:
+  model_id: "tiantiaf/whisper-large-v3-voice-quality"
+  vox_profile_repo: "https://github.com/tiantiaf0627/vox-profile-release.git"
+  threshold: 0.5  # only used by the discrete label-distance eval, NOT training
+  lambda_vq_metric: 0.05  # B-family VQ-metric weight; matched to SEMamba's PESQ
+                          # metric weight (0.05) so B1 is a clean PESQ<->VQ swap.
+                          # Override per run with --lambda-vq for the weight sweep.
+  # Min-max (range) normalization of the VQ distance into the MetricGAN target
+  # range [0,1] (MetricGAN normalizes the metric to [0,1]; Fu et al., ICML 2019).
+  # Quality target = clamp((range_max - d)/(range_max - range_min), 0, 1), so
+  # d=range_min -> 1 and d=range_max -> 0. Affects the discriminator TARGET only;
+  # the reported/eval VQ distance is unchanged. Range = observed val VQ-distance
+  # min/max (n=360 across frozen + fine-tuned outputs; see EXPERIMENTS.md).
+  range_min: 0.0004
+  range_max: 0.3038
+  # --- Direct differentiable VQ loss (Iteration 3 arms C1/C2 only) ---
+  # C1 (--arm C1): output-level loss = L1 between sigmoid(attribute logits).
+  # C2 (--arm C2): deep-feature loss = L1 between selected Whisper encoder hidden
+  #   states (harder to game than the 25 outputs; Germain et al. 2019, arXiv:1806.10522).
+  # lambda_vq_metric (above) is reused as the weight; sweep it the same way.
+  eot: true                 # expectation-over-transformations: random time-shift per
+                            # step on the VQ inputs (anti-gaming). Set false to disable.
+  perceptual_layers: null   # C2 only: list of encoder hidden-state indices to match.
+                            # null -> auto (~thirds + last). e.g. [11, 22, 32].
+
+# Training
+training:
+  # Fixed-budget fine-tune for a fair, equal-step arm comparison. With the 10k
+  # stratified subset and batch_size 4, 1 epoch == 2,500 steps (identical for
+  # every arm). Bump epochs to 2 for 5,000 steps if you want a longer budget.
+  epochs: 1
+  batch_size: 4                          # proven safe on A100-80GB w/ Whisper VQ in memory
+  num_workers: 4
+  lambda_spectral: 1.0
+  lambda_metricgan: 0.5                  # A-family denoising<->VQ tradeoff (sweep {0.25,0.5,1.0} if time)
+  lambda_metricgan_warmup_steps: 0       # FAITHFUL: SEMamba uses NO metric-weight ramp (0.05 from step 0)
+  scheduler: "cosine"                    # LR schedule only -- a fine-tuning choice (see note below)
+  warmup_steps: 500                      # LR warmup (fine-tuning stability; NOT part of SEMamba's loss)
+  grad_clip: 5.0
+  d_update_interval: 1                   # FAITHFUL: SEMamba updates D + applies metric term EVERY step
+  validate_every_n_steps: 500            # ~5 validation points across the 2,500-step budget
+  # Early stopping is effectively DISABLED for the equal-budget comparison: every
+  # arm runs the full fixed step budget so B0 vs B1 see identical training. The
+  # per-validation 'best_model.pt' is still saved, but compare arms at epoch_1.pt
+  # (same step count). Set back to a small value only for unbounded/long runs.
+  early_stop_patience: 100000
+  sisdr_floor_margin_db: 0.5             # accept ckpt only if val SI-SDR >= baseline - this (set huge to disable guard)
+  checkpoint_dir: "./checkpoints"
+  log_dir: "./logs"
+  save_every_epoch: 1
+
+# STFT Loss (A-family fidelity loss)
+stft_loss:
+  fft_sizes: [512, 1024, 2048]
+  hop_sizes: [128, 256, 512]
+  win_sizes: [512, 1024, 2048]
+
+# SEMamba-family loss weights (B-family). VERBATIM from the public SEMamba_advanced
+# recipe (RoyChao19477/SEMamba). complex & consistency carry an extra *2 baked into
+# the loss code (semamba_loss.py), matching SEMamba/train.py exactly.
+semamba_loss:
+  magnitude: 0.9
+  phase: 0.3
+  complex: 0.1
+  time: 0.2
+  consistency: 0.1
+  metric: 0.05      # PESQ-MetricGAN weight (B0/B2)

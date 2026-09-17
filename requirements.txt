@@ -1,0 +1,40 @@
+torch>=2.0.0
+torchaudio>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+pytorch-lightning>=2.0.0
+tensorboard>=2.14.0
+asteroid>=0.7.0
+flow_matching>=1.0.0
+speechbrain>=1.0.0
+
+soundfile>=0.12.0
+librosa>=0.10.0
+resampy>=0.4.0
+audiomentations>=0.34.0
+pysndfx>=0.3.6
+
+pesq>=0.0.4
+pystoi>=0.4.0
+torchmetrics[audio]>=1.3.0
+onnxruntime>=1.16.0
+jiwer>=3.0.0
+openai-whisper>=20231117
+
+transformers==4.40.0
+safetensors>=0.4.0
+huggingface_hub>=0.20.0
+loralib>=0.1.2
+
+scikit-learn>=1.3.0
+joblib>=1.3.0
+matplotlib>=3.7.0
+
+# mamba-ssm and causal-conv1d need wheels matching your CUDA/PyTorch build and
+# must skip build isolation:
+#   CAUSAL_CONV1D_FORCE_BUILD=TRUE pip install causal-conv1d --no-build-isolation
+#   MAMBA_FORCE_BUILD=TRUE pip install mamba-ssm --no-build-isolation

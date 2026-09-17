@@ -1,0 +1,84 @@
+train:
+  batch_size: 32
+  num_epochs: 20
+  accumulation_steps: 1
+  num_workers: 4
+  log_lr: true
+  precision: "16"
+  log_dir: exp/TPredictor_target_absent_finetune
+  log_interval: 100
+  detect_anomaly: false
+  gradient_clip_val: 0.5
+  limit_train_batches: null
+  limit_val_batches: null
+  overfit_batches: 0.0
+  spectral_aug: true
+  target_absent_prob: 0.3
+
+scheduler:
+  type: 'CosineAnnealingLR'
+  t_max: 20
+  eta_min: 0.000001
+  warmup_epochs: 2
+  lr_reduce_patience: 10
+  lr_reduce_factor: 0.5
+  start_epoch: 0
+
+loss:
+  gamma: 0.5
+
+model:
+  C: 1024
+
+dataset:
+  enable_train_360: true
+  enable_train_100: true
+  train_360_dir: '/path/to/speakerbeam/egs/libri2mix/data/wav16k/min/train-360'
+  train_100_dir: '/path/to/speakerbeam/egs/libri2mix/data/wav16k/min/train-100'
+  val_dir: '/path/to/speakerbeam/egs/libri2mix/data/wav16k/min/dev'
+  test_dir: '/path/to/speakerbeam/egs/libri2mix/data/wav16k/min/test'
+  librimix_meta_dir: '/path/to/LibriMix/metadata'
+  task: 'sep_noisy'
+  n_src: 2
+  sample_rate: 16000
+  segment: 3
+  segment_aux: 3
+  n_fft: 510
+  win_length: 510
+  hop_length: 128
+  snr_range: [-15, 15]
+
+optim:
+  optimizer: AdamW
+  lr: 0.00002
+  weight_decay: 0.01
+
+ddp:
+  use_ddp: false
+  num_nodes: 1
+  num_gpus: 1
+  strategy: 'ddp'
+
+seed: 42
+
+early_stopping:
+  enabled: true
+  monitor: 'val_loss'
+  patience: 5
+  verbose: true
+  mode: 'min'
+  delta: 0.0
+
+checkpoint:
+  dir: 'exp/TPredictor_target_absent_finetune/checkpoints'
+  ckpt_name: 'best'
+  save_best: true
+  save_last: true
+  verbose: true
+  monitor: 'val_loss'
+  mode: min
+  load_weights_only: true
+  resume: 't_predictor_noisy.ckpt'
+
+eval:
+  checkpoint: 'exp/TPredictor_target_absent_finetune/checkpoints/best.ckpt'
